@@ -2,6 +2,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
 
+public enum ThrowState { Swing, Spin }
+
 public class Aim : MonoBehaviour
 {
     [Header("General")]
@@ -30,6 +32,7 @@ public class Aim : MonoBehaviour
     [Header("Throw Settings")]
     public float speed = 1.0f;
     public float throwheight = 20f;
+    public int numberOfBounces = 5;
 
     [Space]
     public float swingAmount = 30f;
@@ -181,10 +184,11 @@ public class Aim : MonoBehaviour
             throwheight,
             heightDampening,
             distanceDampening,
-            speedDampening
-        );
+            speedDampening,
+            numberOfBounces
+        ); 
 
-        Destroy(ball, 5f);
+        Destroy(ball, 10f);
     }
 
     void ApplyError(ref Vector3 throwTarget, ref float swing, ref float spin, ref float throwSpeed, float error)

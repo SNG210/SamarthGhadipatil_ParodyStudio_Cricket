@@ -1,78 +1,88 @@
 using UnityEngine;
-
-public enum ThrowState { Swing, Spin }
+using System.Collections.Generic;
 
 public class Ball : MonoBehaviour
 {
-    private Vector3 pointA;
-    public Vector3 pointB;
-    public Vector3 pointC;
-    public Vector3 CurvePoint1;
-    public Vector3 CurvePoint2;
-
-    private float speed = 1.0f;
-    private float originalSpeed;
-    private float speedDampning;
+    private int currentSegment = 0;
     private float t = 0f;
-    private bool toSecondCurve = false;
 
-    public float bounceDampning = 1f;
+    private List<Vector3> pointAList = new List<Vector3>();
+    private List<Vector3> pointBList = new List<Vector3>();
+    private List<Vector3> controlList = new List<Vector3>();
+    private List<float> speedPerSegment = new List<float>();
 
-    public ThrowState currentThrowState = ThrowState.Swing;
-
-    public void InitializeBall(Vector3 pointB, ThrowState currentThrowState, float swingDiveation, float spinDiveation, float speed, float throwheight, float heightDampning, float distanceDampning, float speedDampning)
+    public void InitializeBall(Vector3 firstTarget, ThrowState throwState, float swingDeviation, float spinDeviation, float speed, float throwHeight, float heightDampning, float distanceDampning, float speedDampning, int numberOfBounces)
     {
-        this.speed = speed;
-        originalSpeed = speed;
-        this.speedDampning = speedDampning;
-        this.pointB = pointB;
-        pointA = transform.position;
+        pointAList.Clear();
+        pointBList.Clear();
+        controlList.Clear();
 
-        if (currentThrowState == ThrowState.Swing)
+        Vector3 start = transform.position;
+        Vector3 end = firstTarget;
+
+        for (int i = 0; i < numberOfBounces; i++)
         {
-            Vector3 tempCurvePoint1 = (pointA + pointB) * 0.5f;
-            CurvePoint1 = new Vector3(tempCurvePoint1.x + swingDiveation, throwheight, tempCurvePoint1.z);
-            Vector3 directionBc1 = (CurvePoint1 - pointB) * 2;
-            Vector3 rawC = Vector3.ProjectOnPlane((pointB - directionBc1), Vector3.up);
-            pointC = Vector3.Lerp(pointB, rawC, 1f - distanceDampning);
+            Vector3 control;
+            Vector3 nextPointC;
 
+            float currentSwingDeviation = (i == 0) ? swingDeviation : 0f;
+            float currentSpinDeviation = (i == 0) ? spinDeviation : 0f;
+
+            if (throwState == ThrowState.Swing)
+            {
+                Vector3 mid = (start + end) * 0.5f;
+                control = new Vector3(mid.x + currentSwingDeviation, throwHeight, mid.z);
+
+                Vector3 direction = (control - end) * 2;
+                Vector3 rawC = Vector3.ProjectOnPlane((end - direction), Vector3.up);
+                nextPointC = Vector3.Lerp(end, rawC, 1f - distanceDampning);
+            }
+            else // Spin
+            {
+                Vector3 mid = (start + end) * 0.5f;
+                control = mid;
+                control.y = throwHeight;
+
+                Vector3 direction = (start - end);
+                Vector3 tempPointC = Vector3.ProjectOnPlane((end - direction), Vector3.up);
+                Vector3 rawC = new Vector3(tempPointC.x + currentSpinDeviation, tempPointC.y, tempPointC.z);
+                nextPointC = Vector3.Lerp(end, rawC, 1f - distanceDampning);
+            }
+
+            float dampenedHeight = throwHeight * Mathf.Pow(1f - heightDampning, i);
+            control.y = dampenedHeight;
+
+            pointAList.Add(start);
+            pointBList.Add(end);
+            controlList.Add(control);
+            speedPerSegment.Add(speed);
+
+            start = end;
+            end = nextPointC;
+
+            speed *= (1f - speedDampning);
         }
-        else if (currentThrowState == ThrowState.Spin)
-        {
-            CurvePoint1 = (pointA + pointB) * 0.5f;
-            CurvePoint1.y = throwheight;
-            Vector3 directionBA = (pointA - pointB);
-            Vector3 tempPointC = Vector3.ProjectOnPlane((pointB - directionBA), Vector3.up);
-            Vector3 rawC = new Vector3(tempPointC.x + spinDiveation, tempPointC.y, tempPointC.z);
-            pointC = Vector3.Lerp(pointB, rawC, 1f - distanceDampning);
-
-        }
-
-        CurvePoint2 = (pointB + pointC) * 0.5f;
-        float originalHeight = CurvePoint2.y;
-        CurvePoint2.y = Mathf.Lerp(throwheight, 0, heightDampning);
-
     }
-
 
     private void Update()
     {
-        t += Time.deltaTime * speed;
+        if (currentSegment >= pointAList.Count)
+            return;
 
-        if (!toSecondCurve)
+        t += Time.deltaTime * speedPerSegment[currentSegment];
+
+        if (t >= 1f)
         {
-            transform.position = GetQuadraticBezierCurvePoint(t, pointA, CurvePoint1, pointB);
+            t = 0f;
+            currentSegment++;
 
-            if (t >= 1f)
-            {
-                t = 0f;
-                toSecondCurve = true;
-                speed = Mathf.Lerp(originalSpeed, 0f, speedDampning);
-            }
+            if (currentSegment >= pointAList.Count)
+                return;
         }
-        else
+
+        if (currentSegment < pointAList.Count)
         {
-            transform.position = GetQuadraticBezierCurvePoint(t, pointB, CurvePoint2, pointC);
+            transform.position = GetQuadraticBezierCurvePoint(t, pointAList[currentSegment], controlList[currentSegment], pointBList[currentSegment]);
         }
     }
 
@@ -83,26 +93,38 @@ public class Ball : MonoBehaviour
 
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.green;
-        Gizmos.DrawSphere(pointA, 0.2f);
+        if (pointAList.Count == 0 || controlList.Count == 0 || pointBList.Count == 0)
+            return;
 
-        Gizmos.color = Color.red;
-        Gizmos.DrawSphere(pointB, 0.2f);
+        int resolution = 20; 
 
-        Gizmos.color = Color.blue;
-        Gizmos.DrawSphere(pointC, 0.2f);
+        for (int i = 0; i < pointAList.Count; i++)
+        {
+            Vector3 prevPoint = pointAList[i];
 
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawSphere(CurvePoint1, 0.2f);
+            Gizmos.color = Color.green;
+            Gizmos.DrawSphere(pointAList[i], 0.15f);
 
-        Gizmos.color = Color.cyan;
-        Gizmos.DrawSphere(CurvePoint2, 0.2f);
+            Gizmos.color = Color.red;
+            Gizmos.DrawSphere(pointBList[i], 0.15f);
 
-        // Draw lines between points to visualize paths
-        Gizmos.color = Color.white;
-        Gizmos.DrawLine(pointA, CurvePoint1);
-        Gizmos.DrawLine(CurvePoint1, pointB);
-        Gizmos.DrawLine(pointB, CurvePoint2);
-        Gizmos.DrawLine(CurvePoint2, pointC);
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawSphere(controlList[i], 0.15f);
+
+            Gizmos.color = Color.white;
+            Gizmos.DrawLine(pointAList[i], controlList[i]);
+            Gizmos.DrawLine(controlList[i], pointBList[i]);
+
+            Gizmos.color = Color.cyan;
+            for (int j = 1; j <= resolution; j++)
+            {
+                float t = j / (float)resolution;
+                Vector3 point = GetQuadraticBezierCurvePoint(t, pointAList[i], controlList[i], pointBList[i]);
+                Gizmos.DrawLine(prevPoint, point);
+                prevPoint = point;
+            }
+        }
     }
+
+
 }
